@@ -49,16 +49,18 @@ def route_to_synthesis(state: WorkflowState) -> str:
 
 
 def build_workflow() -> StateGraph:
+    # 构建图
     workflow = StateGraph(WorkflowState)
-
+    # 添加节点
     workflow.add_node(intent_analyzer.name, intent_analyzer)
     workflow.add_node(research_agent.name, research_agent)
     workflow.add_node(retrieval_agent.name, retrieval_agent)
     workflow.add_node(skill_executor.name, skill_executor)
     workflow.add_node(synthesis_agent.name, synthesis_agent)
-
-    workflow.set_entry_point(intent_analyzer.name)
-
+    # 设置入口节点
+    workflow.set_entry_point(intent_analyzer.name) 
+    
+    # 添加条件边
     workflow.add_conditional_edges(
         intent_analyzer.name,
         route_after_intent,
@@ -69,6 +71,7 @@ def build_workflow() -> StateGraph:
         },
     )
 
+    # 三个agent都指向synthesis_agent
     workflow.add_conditional_edges(
         research_agent.name,
         route_to_synthesis,
@@ -85,8 +88,9 @@ def build_workflow() -> StateGraph:
         {synthesis_agent.name: synthesis_agent.name},
     )
 
+    # 最后synthesis_agent指向END
     workflow.add_edge(synthesis_agent.name, END)
-
+    # 编译图
     return workflow.compile()
 
 
