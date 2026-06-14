@@ -1,43 +1,34 @@
 import asyncio
+import json
+from langchain_core.tools import tool
 from tools.mcp_manager import MCPSessionManager
 from config.settings import settings
 
 
-class ArXivMCPSearch:
-    def __init__(self):
-        self._manager: MCPSessionManager | None = None
+@tool
+def arxiv_search(query: str, max_results: int = 5) -> str:
+    """搜索ArXiv学术论文。输入查询关键词，返回相关论文（标题、作者、摘要、链接）。
 
-    async def _ensure_connected(self):
-        if self._manager is None:
-            self._manager = MCPSessionManager()
-            await self._manager.connect(
-                command=settings.ARXIV_MCP_COMMAND,
-                args=settings.ARXIV_MCP_ARGS.split(),
-            )
-        return self._manager
-
-    async def search(self, query: str, max_results: int | None = None) -> str:
-        if max_results is None:
-            max_results = settings.MAX_ARXIV_RESULTS
-        try:
-            manager = await self._ensure_connected()
-            result = await manager.call_tool(
-                "search_papers",
-                {"query": query, "max_results": max_results},
-            )
-            return result
-        except Exception as e:
-            return f"[ArXiv Error] {e}"
-
-    async def close(self):
-        if self._manager:
-            await self._manager.close()
-            self._manager = None
-
-
-def arxiv_sync_search(query: str, max_results: int | None = None) -> str:
-    searcher = ArXivMCPSearch()
+    Args:
+        query: 搜索关键词（建议使用英文）
+        max_results: 最大返回论文数，默认5
+    """
     try:
-        return asyncio.run(searcher.search(query, max_results))
-    finally:
-        asyncio.run(searcher.close())
+        async def _search():
+            manager = MCPSessionManager()
+            try:
+                await manager.connect(
+                    command=settings.ARXIV_MCP_COMMAND,
+                    args=settings.ARXIV_MCP_ARGS.split(),
+                )
+                result = await manager.call_tool(
+                    "search_papers",
+                    {"query": query, "max_results": max_results},
+                )
+                return result
+            finally:
+                await manager.close()
+
+        return asyncio.run(_search())
+    except Exception as e:
+        return json.dumps([{"title": "ArXiv Error", "content": str(e)}])

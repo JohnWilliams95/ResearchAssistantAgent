@@ -1,4 +1,4 @@
-from tools.web_search_tool import WebSearchTool
-from tools.arxiv_tool import arxiv_sync_search
+from tools.web_search_tool import web_search
+from tools.arxiv_tool import arxiv_search
 
-__all__ = ["WebSearchTool", "arxiv_sync_search"]
+__all__ = ["web_search", "arxiv_search"]

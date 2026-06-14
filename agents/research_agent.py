@@ -1,16 +1,16 @@
-import asyncio
 import json
 from langchain_core.messages import HumanMessage, SystemMessage
 from agents.base import BaseAgent
 from state.workflow_state import WorkflowState, Document
-from tools.web_search_tool import WebSearchTool
-from tools.arxiv_tool import ArXivMCPSearch
+from tools.web_search_tool import web_search
+from tools.arxiv_tool import arxiv_search
 from config.settings import settings
 
 
 class ResearchAgent(BaseAgent):
     def __init__(self):
         super().__init__(temperature=0.1)
+        self.tools = [web_search, arxiv_search]
 
     @property
     def name(self) -> str:
@@ -22,52 +22,45 @@ class ResearchAgent(BaseAgent):
 
     @property
     def system_prompt(self) -> str:
-        return """你是一个信息检索专家。你的任务分为两步：
+        return """你是一个信息检索专家。你可以使用以下工具：
 
-第一步：查询改写。将用户的自然语言问题改写为更适合搜索引擎和学术论文检索的查询词。
-- web_query: 用于 Web 搜索的关键词（简洁、精准，提取核心概念）
-- arxiv_query: 用于 ArXiv 论文检索的查询（可以用英文，包含关键术语和学术词汇）
+- web_search: 搜索网页获取实时信息。输入搜索关键词，返回相关网页结果（标题、链接、摘要）。
+- arxiv_search: 搜索 ArXiv 学术论文。输入查询关键词，返回相关论文（标题、作者、摘要、链接）。
 
-第二步：结果筛选。从搜索结果中筛选出与用户问题最相关的信息，去除无关或低质量内容。
-保留最有价值的信息片段，每个结果保留核心摘要（不超过200字）。
-
-请以 JSON 格式输出：
-{"web_query": "...", "arxiv_query": "..."}
-
-后续你会收到搜索结果，届时请以 JSON 格式输出筛选结果：
-{"filtered_web": [{"title": "...", "content": "...", "url": "..."}], "filtered_arxiv": [{"title": "...", "content": "..."}]}"""
+根据用户问题，分析是否需要搜索。如果需要，调用相应工具获取信息。
+如果用户问题是对比类或学术类问题，建议同时调用两个工具。
+如果用户问题是通用问题，根据需要选择性调用。"""
 
     def __call__(self, state: WorkflowState) -> dict:
         query = state["query"]
 
-        rewrite_response = self.llm.invoke([
+        llm_with_tools = self.llm.bind_tools(self.tools)
+
+        response = llm_with_tools.invoke([
             SystemMessage(content=self.system_prompt),
-            HumanMessage(content=f"用户问题：{query}\n\n请先输出查询改写的 JSON。"),
+            HumanMessage(content=f"用户问题：{query}"),
         ])
-        rewritten = self._parse_json(rewrite_response.content)
-        web_query = rewritten.get("web_query", query)
-        arxiv_query = rewritten.get("arxiv_query", query)
 
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+        web_results = []
+        arxiv_results = []
 
-        web_raw, arxiv_raw = loop.run_until_complete(
-            self._research_async(
-                web_query,
-                arxiv_query,
-                settings.MAX_SEARCH_RESULTS,
-                settings.MAX_ARXIV_RESULTS,
-            )
-        )
+        if response.tool_calls:
+            for tool_call in response.tool_calls:
+                tool_name = tool_call["name"]
+                tool_args = tool_call["args"]
 
-        search_docs = self._format_web_to_documents(web_raw)
-        arxiv_docs = self._parse_arxiv_result(arxiv_raw, settings.MAX_ARXIV_RESULTS)
+                if tool_name == "web_search":
+                    result = web_search.invoke(tool_args)
+                    web_results = json.loads(result) if isinstance(result, str) else result
+                elif tool_name == "arxiv_search":
+                    result = arxiv_search.invoke(tool_args)
+                    arxiv_results = json.loads(result) if isinstance(result, str) else result
+
+        search_docs = self._format_web_to_documents(web_results)
+        arxiv_docs = self._parse_arxiv_result(arxiv_results, settings.MAX_ARXIV_RESULTS)
 
         filter_response = self.llm.invoke([
-            SystemMessage(content=self.system_prompt),
+            SystemMessage(content="你是一个信息检索专家。根据搜索结果筛选出与用户问题最相关的信息。"),
             HumanMessage(content=self._build_filter_prompt(query, search_docs, arxiv_docs)),
         ])
         filtered = self._parse_json(filter_response.content)
@@ -120,24 +113,6 @@ class ResearchAgent(BaseAgent):
 {arxiv_text}
 
 请从以上结果中筛选出与用户问题最相关的信息，输出筛选后的 JSON。"""
-
-    async def _research_async(self, web_query: str, arxiv_query: str, max_web: int, max_arxiv: int):
-        loop = asyncio.get_event_loop()
-
-        def sync_web():
-            ws = WebSearchTool()
-            return ws.search(query=web_query, max_results=max_web)
-
-        async def async_arxiv():
-            searcher = ArXivMCPSearch()
-            try:
-                return await searcher.search(query=arxiv_query, max_results=max_arxiv)
-            finally:
-                await searcher.close()
-
-        web_results = await loop.run_in_executor(None, sync_web)
-        arxiv_results = await async_arxiv()
-        return web_results, arxiv_results
 
     @staticmethod
     def _parse_json(text: str) -> dict:
