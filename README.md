@@ -63,11 +63,11 @@ ResearchAssistantAgent/
 ├── agents/                     # 多 Agent 架构核心
 │   ├── __init__.py
 │   ├── base.py                 # BaseAgent 抽象基类（延迟初始化 LLM）
-│   ├── intent_analyzer.py      # Agent 1: 意图分析
-│   ├── research.py             # Agent 2: 外部信息检索（Tavily + ArXiv）
-│   ├── retrieval.py            # Agent 3: 本地知识库检索（ChromaDB）
-│   ├── skill_executor.py       # Agent 4: 技能调度执行
-│   ├── synthesis.py            # Agent 5: 多源信息综合
+│   ├── intent_analyzer_agent.py      # Agent 1: 意图分析
+│   ├── research_agent.py             # Agent 2: 外部信息检索（Tavily + ArXiv）
+│   ├── retrieval_agent.py            # Agent 3: 本地知识库检索（ChromaDB）
+│   ├── skill_executor_agent.py       # Agent 4: 技能调度执行
+│   ├── synthesis_agent.py            # Agent 5: 多源信息综合
 │   └── supervisor.py           # 编排层：构建 Graph + 路由逻辑
 │
 ├── tools/                      # 工具层

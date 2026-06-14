@@ -1,3 +1,5 @@
+import json
+from langchain_core.messages import HumanMessage, SystemMessage
 from agents.base import BaseAgent
 from state.workflow_state import WorkflowState, Document
 from retrieval.vector_store import VectorStore
@@ -18,18 +20,33 @@ class RetrievalAgent(BaseAgent):
 
     @property
     def system_prompt(self) -> str:
-        return """你是一个知识检索专家。你管理一个向量知识库（ChromaDB + sentence-transformers），
-能够根据用户问题进行语义检索，返回最相关的知识片段。
+        return """你是一个知识检索专家。你的任务分为两步：
+
+第一步：查询改写。将用户的自然语言问题改写为更适合向量语义检索的查询。
+向量检索偏好：名词短语、关键术语、概念词汇，而非完整的问句。
+输出 JSON：{"retrieval_query": "改写后的检索查询"}
+
+第二步：结果评估。评估检索到的知识片段与用户问题的相关性，过滤掉不相关的内容。
+输出 JSON：{"evaluated_results": [{"content": "...", "score": 0.95, "reason": "相关原因"}]}
 
 知识库中预置了 LangGraph、AutoGen、MCP、Multi-Agent System、RAG、ChromaDB 等领域知识。
 如果知识库为空，会自动初始化预置知识。"""
 
     def __call__(self, state: WorkflowState) -> dict:
+        query = state["query"]
+
+        rewrite_response = self.llm.invoke([
+            SystemMessage(content=self.system_prompt),
+            HumanMessage(content=f"用户问题：{query}\n\n请先输出查询改写的 JSON（第一步）。"),
+        ])
+        rewritten = self._parse_json(rewrite_response.content)
+        retrieval_query = rewritten.get("retrieval_query", query)
+
         store = VectorStore()
         if store.count() == 0:
             self._seed_knowledge_base(store)
 
-        results = store.search(state["query"], n_results=settings.MAX_RETRIEVAL_RESULTS)
+        results = store.search(retrieval_query, n_results=settings.MAX_RETRIEVAL_RESULTS)
         docs = [
             Document(
                 content=r.get("content", ""),
@@ -38,7 +55,58 @@ class RetrievalAgent(BaseAgent):
             )
             for r in results
         ]
-        return {"retrieval_results": docs}
+
+        evaluate_response = self.llm.invoke([
+            SystemMessage(content=self.system_prompt),
+            HumanMessage(content=self._build_evaluate_prompt(query, docs)),
+        ])
+        evaluated = self._parse_json(evaluate_response.content)
+        evaluated_results = evaluated.get("evaluated_results", [])
+
+        if evaluated_results:
+            final_docs = [
+                Document(
+                    content=r.get("content", ""),
+                    source="chroma:evaluated",
+                    title=f"KB Doc (relevance: {r.get('score', 'N/A')})",
+                )
+                for r in evaluated_results
+            ]
+        else:
+            final_docs = docs
+
+        return {"retrieval_results": final_docs}
+
+    def _build_evaluate_prompt(self, query: str, docs: list[Document]) -> str:
+        items = []
+        for i, doc in enumerate(docs, 1):
+            items.append(f"[片段 {i}] {doc.get('content', '')}")
+
+        items_text = "\n\n".join(items) if items else "（无检索结果）"
+
+        return f"""用户问题：{query}
+
+以下是向量检索返回的知识片段：
+
+{items_text}
+
+请评估每个片段与用户问题的相关性，过滤掉不相关的内容，输出评估后的 JSON（第二步）。"""
+
+    @staticmethod
+    def _parse_json(text: str) -> dict:
+        text = text.strip()
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0].strip()
+        elif "```" in text:
+            text = text.split("```")[1].split("```")[0].strip()
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        if start != -1 and end > start:
+            text = text[start:end]
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return {}
 
     @staticmethod
     def _seed_knowledge_base(store: VectorStore):

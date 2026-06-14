@@ -1,10 +1,10 @@
 from langgraph.graph import StateGraph, END
 from state.workflow_state import WorkflowState
-from agents.intent_analyzer import IntentAnalyzerAgent
-from agents.research import ResearchAgent
-from agents.retrieval import RetrievalAgent
-from agents.skill_executor import SkillExecutorAgent
-from agents.synthesis import SynthesisAgent
+from agents.intent_analyzer_agent import IntentAnalyzerAgent
+from agents.research_agent import ResearchAgent
+from agents.retrieval_agent import RetrievalAgent
+from agents.skill_executor_agent import SkillExecutorAgent
+from agents.synthesis_agent import SynthesisAgent
 
 
 # ── 实例化所有 Agent（每个都有独立的 System Prompt 和 LLM 实例）──

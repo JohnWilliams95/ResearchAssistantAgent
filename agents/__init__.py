@@ -1,9 +1,9 @@
 from .base import BaseAgent
-from .intent_analyzer import IntentAnalyzerAgent
-from .research import ResearchAgent
-from .retrieval import RetrievalAgent
-from .skill_executor import SkillExecutorAgent
-from .synthesis import SynthesisAgent
+from .intent_analyzer_agent import IntentAnalyzerAgent
+from .research_agent import ResearchAgent
+from .retrieval_agent import RetrievalAgent
+from .skill_executor_agent import SkillExecutorAgent
+from .synthesis_agent import SynthesisAgent
 from .supervisor import build_workflow, list_agents
 
 __all__ = [
